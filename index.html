@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>BUKETINAJA v12</title>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;800&display=swap" rel="stylesheet">
+    
+    <style>
+        :root {
+            --pink-soft: #ff75a0;
+            --pink-pastel: #fce4ec;
+            --purple-deep: #9c27b0;
+            --white: #ffffff;
+        }
+
+        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+        body, html {
+            margin: 0; padding: 0; width: 100%; height: 100%;
+            font-family: 'Poppins', sans-serif;
+            background: var(--pink-pastel); overflow: hidden;
+        }
+
+        .hidden { display: none !important; }
+
+        /* --- FIX BOCOR SLIDE (Bukti 1) --- */
+        .viewport { width: 100vw; height: 100vh; overflow: hidden; position: relative; }
+        .slide-container {
+            display: flex; width: 400vw; height: 100vh;
+            transition: transform 0.5s ease-in-out;
+        }
+        .slide { 
+            width: 100vw; height: 100vh; 
+            flex-shrink: 0; /* Mengunci agar tidak bocor */
+            display: flex; flex-direction: column; 
+            position: relative;
+        }
+
+        /* --- FIX TOMBOL BESAR (Bukti 2) --- */
+        .menu-wrapper { flex: 1; overflow-y: auto; padding: 15px; padding-bottom: 100px; }
+        .product-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+        
+        .item-card {
+            background: white; border-radius: 12px; padding: 10px; text-align: center;
+            border: 2px solid transparent; box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+        }
+        .item-card.active { border-color: var(--pink-soft); background: #fff9fb; }
+        .item-emoji { font-size: 2rem; display: block; }
+
+        /* Tombol Selesai di bawah menu (Harus Scroll) */
+        .finish-area { margin-top: 30px; text-align: center; padding-bottom: 20px; }
+
+        .btn-main {
+            padding: 12px 25px; border-radius: 50px; border: none;
+            font-weight: 800; cursor: pointer; background: var(--pink-soft); color: white;
+        }
+
+        /* Lock Screen */
+        #lock-screen { 
+            position: fixed; inset: 0; background: black; z-index: 9999; 
+            display: flex; justify-content: center; align-items: center; color: white;
+        }
+    </style>
+</head>
+<body>
+
+    <audio id="bg-music" src="musikcio.mp3" loop></audio>
+
+    <div id="login-modal" style="position:fixed; inset:0; background:white; z-index:10000; display:flex; justify-content:center; align-items:center; flex-direction:column;">
+        <h2>LOG IN BUKETINAJA</h2>
+        <button class="btn-main" onclick="auth('kasir')" style="margin-bottom:10px; background:#2d3436">KASIR (LAPTOP)</button>
+        <button class="btn-main" onclick="auth('customer')">CUSTOMER (HP)</button>
+    </div>
+
+    <div id="screen-kasir" class="hidden" style="padding:40px;">
+        <h1>Panel Kasir</h1>
+        <button onclick="setPower(true)" style="background:green; color:white; padding:10px">HIDUPKAN LAYAR</button>
+        <button onclick="setPower(false)" style="background:red; color:white; padding:10px">MATIKAN LAYAR</button>
+        <div id="order-list"></div>
+    </div>
+
+    <div id="screen-customer" class="hidden">
+        <div id="lock-screen" class="hidden"><h1>OFFLINE</h1></div>
+
+        <div class="viewport">
+            <div class="slide-container" id="main-slider">
+                <div class="slide">
+                    <div class="menu-wrapper">
+                        <h3 style="text-align:center; color:var(--purple-deep)">Pilih Buket Favoritmu 🌸</h3>
+                        <div class="product-grid" id="menu-container"></div>
+                        
+                        <div class="finish-area">
+                            <p>Total: <b id="total-price">Rp0</b></p>
+                            <button class="btn-main" onclick="goToStep(1)">SELESAI PESAN ➔</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="slide" style="justify-content:center; align-items:center;">
+                    <div style="background:white; padding:30px; border-radius:20px; text-align:center; width:60%">
+                        <h3>Nama Kamu? ✨</h3>
+                        <input type="text" id="cust-name" style="width:100%; padding:10px; text-align:center" placeholder="Ketik nama...">
+                        <br><br>
+                        <button class="btn-main" onclick="goToStep(2)">LANJUTKAN</button>
+                    </div>
+                </div>
+
+                <div class="slide" style="justify-content:center; align-items:center; text-align:center;">
+                    <h2>TERIMA KASIH!</h2>
+                    <p>Silahkan bayar di kasir.</p>
+                </div>
+
+                <div class="slide" style="justify-content:center; align-items:center; text-align:center;">
+                    <p>NOMOR ANTREAN</p>
+                    <h1 style="font-size:8rem; color:var(--purple-deep); margin:0" id="final-queue">0</h1>
+                    <h2 id="final-name">NAME</h2>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-database-compat.js"></script>
+
+    <script>
+        const firebaseConfig = { databaseURL: "https://bucketinaja-f19db-default-rtdb.asia-southeast1.firebasedatabase.app/" };
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.database();
+
+        let cart = [];
+        let myRole = "";
+        let currentOrderId = null;
+        let isAnnounced = false; // Kontrol suara agar cuma 1x
+
+        const items = [
+            { n: "BUKET FULL", p: 55000, e: "💐" },
+            { n: "KERTAS WARNA", p: 10000, e: "🎁" },
+            { n: "KERTAS PUTIH", p: 5000, e: "📄" },
+            { n: "BUNGA HIAS", p: 15000, e: "🌹" },
+            { n: "SNACK BUCKET", p: 35000, e: "🍫" },
+            { n: "KADO SPESIAL", p: 75000, e: "💖" }
+        ];
+
+        function auth(role) {
+            if(prompt("PIN:") === "172737") {
+                myRole = role;
+                document.getElementById('login-modal').classList.add('hidden');
+                document.getElementById(`screen-${role}`).classList.remove('hidden');
+                if(role === 'kasir') initKasir(); else initCustomer();
+            }
+        }
+
+        function initCustomer() {
+            const container = document.getElementById('menu-container');
+            container.innerHTML = items.map((m, i) => `
+                <div class="item-card" id="i-${i}" onclick="addCart('${m.n}', ${m.p}, ${i})">
+                    <span class="item-emoji">${m.e}</span>
+                    <b style="font-size:0.7rem">${m.n}</b><br>
+                    <small>Rp${m.p.toLocaleString()}</small>
+                </div>
+            `).join('');
+
+            db.ref('system/isPowerOn').on('value', s => {
+                const isON = s.val();
+                document.getElementById('lock-screen').classList.toggle('hidden', isON);
+                
+                const music = document.getElementById('bg-music');
+                if(!isON) {
+                    music.play().catch(e => console.log("User interaction needed"));
+                } else {
+                    music.pause();
+                    music.currentTime = 0;
+                    goToStep(0);
+                    resetCart();
+                }
+            });
+
+            // Notifikasi Selesai (Hanya 1x)
+            db.ref('orders').on('child_changed', snap => {
+                const o = snap.val();
+                if(o.status === 'done' && !o.announced) {
+                    speakOnce(`Pesanan atas nama ${o.name} sudah selesai.`);
+                    db.ref(`orders/${snap.key}`).update({ announced: true });
+                }
+                if(snap.key === currentOrderId && o.status === 'approved') {
+                    document.getElementById('final-queue').innerText = o.queue;
+                    document.getElementById('final-name').innerText = o.name;
+                    goToStep(3);
+                }
+            });
+        }
+
+        function addCart(n, p, i) {
+            cart.push({n, p});
+            document.getElementById(`i-${i}`).classList.add('active');
+            document.getElementById('total-price').innerText = "Rp" + cart.reduce((a,b)=>a+b.p,0).toLocaleString();
+        }
+
+        function resetCart() {
+            cart = [];
+            document.getElementById('total-price').innerText = "Rp0";
+            document.querySelectorAll('.item-card').forEach(el => el.classList.remove('active'));
+        }
+
+        function goToStep(s) {
+            if(s === 2) {
+                const name = document.getElementById('cust-name').value;
+                const ref = db.ref('orders').push();
+                currentOrderId = ref.key;
+                ref.set({ name, items: cart, status: 'wait', announced: false });
+            }
+            document.getElementById('main-slider').style.transform = `translateX(-${s * 100}vw)`;
+        }
+
+        function speakOnce(text) {
+            const u = new SpeechSynthesisUtterance(text);
+            u.lang = 'id-ID';
+            window.speechSynthesis.speak(u);
+        }
+
+        // KASIR FUNCTIONS
+        function initKasir() {
+            db.ref('orders').on('value', snap => {
+                const list = document.getElementById('order-list');
+                list.innerHTML = "";
+                snap.forEach(child => {
+                    const o = child.val();
+                    if(o.status !== 'done') {
+                        list.innerHTML += `<div style="background:white; margin:10px; padding:10px">
+                            ${o.name} - <button onclick="approve('${child.key}')">Approve</button>
+                            <button onclick="finish('${child.key}')">Selesai</button>
+                        </div>`;
+                    }
+                });
+            });
+        }
+        function approve(k) {
+            db.ref('lastQueue').transaction(q => {
+                const n = (q || 0) + 1;
+                db.ref(`orders/${k}`).update({ status: 'approved', queue: n });
+                return n;
+            });
+        }
+        function finish(k) { db.ref(`orders/${k}`).update({ status: 'done' }); }
+        function setPower(v) { db.ref('system').update({ isPowerOn: v }); }
+    </script>
+</body>
+</html>
